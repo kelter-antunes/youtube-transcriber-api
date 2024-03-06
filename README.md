@@ -14,8 +14,11 @@ docker run -p 5000:5000 kelter/youtube-transcriber-api
 Explanation of the command:
 
 `docker run`: This command is used to run a container from a Docker image.
+
 `-p 5000:5000`: This flag maps port `5000` on your host machine to port `5000` on the container. It allows you to access the service running inside the container at `http://localhost:5000`.
+
 `kelter/youtube-transcriber-api`: This is the name of the Docker image you want to run.
+
 
 Make sure that you have Docker installed on your machine, and this command should start a container running a Flask application.
 If you want to run the container in the background (detached mode), you can add the `-d` flag:
