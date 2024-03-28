@@ -2,11 +2,10 @@ version: '3'
 
 services:
   api_server:  
-    build:
-      context: .
+    image: kelter/youtube-transcriber-api
     ports:
       - 5000:5000
-    restart: always  # Set restart policy to always
+    restart: unless-stopped  # Set restart policy to unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
