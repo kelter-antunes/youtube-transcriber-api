@@ -1,95 +1,139 @@
-from flask import request
+from flask import request, current_app as app
 from flask_restful import Resource
 
-from youtube_transcript_api._errors import NoTranscriptFound
-
-from ._errors import InvalidAPIUsage, TranscriptionError
-from ._errors import YOUTUBE_API_ERRORS, error_messages
-from ._settings import LANGUAGE_CODES, TRANSCRIPT_OUTPUT_TYPES
-from ._parser import parse_transcript
-from ._transcript import retrieve_transcript, build_transcript
-
+from src._errors import InvalidAPIUsage, TranscriptionError
+from src._settings import LANGUAGE_CODES, TRANSCRIPT_OUTPUT_TYPES
+from src._parser import parse_transcript
+from src._transcript import retrieve_transcript, build_transcript
 
 class Transcript(Resource):
-    def get(self):
-        # Get query params
-        video_id = request.args.get('id')
-        language_codes = request.args.get('lang')
-        output_type = request.args.get('type') or "text"
-        include_line_break = bool(int(request.args.get('lb') or 0))
-        include_sfx = bool(int(request.args.get('sfx') or 0))
+    def __init__(self, cache=None):
+        self.cache = cache
 
-        # Validate request
+    def get(self):
+        video_id, language_codes, output_type, include_line_break, include_sfx = self._parse_request_args()
+
+        # Always cache the response
+        cache_key = (request.path, request.query_string)
+        cached_data = self.cache.get(cache_key)
+        if cached_data:
+            if app.config['DEBUG']:
+                print("HIT: Cache hit for key", cache_key)
+            return cached_data
+
         if not video_id:
             raise InvalidAPIUsage(error_messages["noVideoId"])
 
         output_type = output_type.lower()
-        if not output_type in TRANSCRIPT_OUTPUT_TYPES:
+        if output_type not in TRANSCRIPT_OUTPUT_TYPES:
             raise InvalidAPIUsage(error_messages["invalidOutput"])
 
-        # Attempt to retrieve the transcript
         transcript_list = retrieve_transcript(video_id)
 
-        # Retrieve the transcript in specified language. If no language was specified, all available transcripts will be returned
         if not language_codes:
-            return {
+            response_data = {
                 "videoId": video_id,
                 "transcripts": [build_transcript(transcript, output_type, include_line_break, include_sfx) for transcript in transcript_list]
-            }, 200
+            }
         else:
             try:
                 transcript = transcript_list.find_transcript([language_codes])
-                return {
+                response_data = {
                     "videoId": video_id,
                     "transcripts": [build_transcript(transcript, output_type, include_line_break, include_sfx)]
-                }, 200
+                }
             except NoTranscriptFound:
                 raise TranscriptionError(error_messages["noTranscriptFoundForLanguage"])
 
+        # Cache the response
+        self.cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
+
+        if app.config['DEBUG']:
+            if not cached_data:
+                print("MISS: Cache miss for key", cache_key)
+
+        return response_data, 200
+
+    def _parse_request_args(self):
+        video_id = request.args.get('id')
+        language_codes = request.args.get('lang')
+        output_type = request.args.get('type', 'text')
+        include_line_break = bool(request.args.get('lb', 0))
+        include_sfx = bool(request.args.get('sfx', 0))
+        return video_id, language_codes, output_type, include_line_break, include_sfx
+
 
 class TranslatedTranscript(Resource):
-    def get(self):
-        # Get query params
-        video_id = request.args.get('id')
-        language_code = request.args.get('lang')
+    def __init__(self, cache=None):
+        self.cache = cache
 
-        # Validate request
+    def get(self):
+        video_id, language_code = self._parse_request_args()
+
+        # Always cache the response
+        cache_key = (request.path, request.query_string)
+        cached_data = self.cache.get(cache_key)
+        if cached_data:
+            if app.config['DEBUG']:
+                print("HIT: Cache hit for key", cache_key)
+            return cached_data
+
         if not video_id:
             raise InvalidAPIUsage(error_messages["noVideoId"])
         if not language_code:
             raise InvalidAPIUsage(error_messages["noTargetLanguage"])
 
-        # Attempt to retrieve the transcript
         transcript_list = retrieve_transcript(video_id)
-
-        # Translate transcript
         transcript = transcript_list.find_transcript(LANGUAGE_CODES)
+
         try:
             translated_transcript = transcript.translate(language_code)
         except YOUTUBE_API_ERRORS as e:
             raise TranscriptionError(e.cause)
 
-        return {
+        response_data = {
             "videoId": video_id,
             "sourceLanguage": transcript.language_code,
             "targetLanguage": language_code,
             "transcripts": parse_transcript(translated_transcript.fetch())
-        }, 200
+        }
+
+        # Cache the response
+        self.cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
+
+        if app.config['DEBUG']:
+            if not cached_data:
+                print("MISS: Cache miss for key", cache_key)
+
+        return response_data, 200
+
+    def _parse_request_args(self):
+        video_id = request.args.get('id')
+        language_code = request.args.get('lang')
+        return video_id, language_code
 
 
 class TranscriptMetadata(Resource):
+    def __init__(self, cache=None):
+        self.cache = cache
+
     def get(self):
-        # Get query params
         video_id = request.args.get('id')
 
-        # Validate request
+        # Always cache the response
+        cache_key = (request.path, request.query_string)
+        cached_data = self.cache.get(cache_key)
+        if cached_data:
+            if app.config['DEBUG']:
+                print("HIT: Cache hit for key", cache_key)
+            return cached_data
+
         if not video_id:
             raise InvalidAPIUsage(error_messages["noVideoId"])
 
-        # Attempt to retrieve the transcript
         transcript_list = retrieve_transcript(video_id)
 
-        return {
+        response_data = {
             "videoId": video_id,
             "transcripts": [
                 {
@@ -99,4 +143,13 @@ class TranscriptMetadata(Resource):
                     "isTranslatable": transcript.is_translatable
                 } for transcript in transcript_list
             ]
-        }, 200
+        }
+
+        # Cache the response
+        self.cache.set(cache_key, response_data, timeout=3600)  # Cache for 1 hour
+
+        if app.config['DEBUG']:
+            if not cached_data:
+                print("MISS: Cache miss for key", cache_key)
+
+        return response_data, 200
